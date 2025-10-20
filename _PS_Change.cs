@@ -1,6 +1,6 @@
 /*
 @name: _PS_Change
-@version: 0.1
+@version: 1.0
 
 Copyright (c) 2025 AetherusFX
 
@@ -26,7 +26,7 @@ SOFTWARE.
 using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
-using UnityEngine.ParticleSystemJobs; // 🔹 Unity 표준 환경에도 존재하는 네임스페이스
+using UnityEngine.ParticleSystemJobs;
 
 
 public class _PS_Change : EditorWindow
@@ -67,7 +67,7 @@ public class _PS_Change : EditorWindow
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label("Hue", GUILayout.Width(PropertyLabelWidth));
         float prevHue = hueShift;
-        hueShift = EditorGUILayout.Slider(hueShift, -1f, 1f, GUILayout.Width(150));
+        hueShift = EditorGUILayout.Slider(hueShift, -1f, 1f, GUILayout.Width(180));
         if (GUILayout.Button("✔️", GUILayout.Width(PropertyButtonWidth)))
         {
             SnapshotOriginalColors();
@@ -89,7 +89,7 @@ public class _PS_Change : EditorWindow
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label("S (채도)", GUILayout.Width(PropertyLabelWidth));
         float prevS = sDelta;
-        sDelta = EditorGUILayout.Slider(sDelta, -1f, 1f, GUILayout.Width(150));
+        sDelta = EditorGUILayout.Slider(sDelta, -1f, 1f, GUILayout.Width(180));
         if (GUILayout.Button("✔️", GUILayout.Width(PropertyButtonWidth)))
         {
             SnapshotOriginalColors();
@@ -99,13 +99,13 @@ public class _PS_Change : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         if (Mathf.Abs(sDelta - prevS) > 0.0001f)
-            ApplySVADelta(selectionParticleSystems, sDelta, 0, 0);
+            ApplySVADelta(selectionParticleSystems, sDelta, vDelta, aDelta); // ⚠️ S 변경 시 V, A 누적값 전달
 
         // V
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label("V (명도)", GUILayout.Width(PropertyLabelWidth));
         float prevV = vDelta;
-        vDelta = EditorGUILayout.Slider(vDelta, -1f, 1f, GUILayout.Width(150));
+        vDelta = EditorGUILayout.Slider(vDelta, -1f, 1f, GUILayout.Width(180));
         if (GUILayout.Button("✔️", GUILayout.Width(PropertyButtonWidth)))
         {
             SnapshotOriginalColors();
@@ -115,13 +115,13 @@ public class _PS_Change : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         if (Mathf.Abs(vDelta - prevV) > 0.0001f)
-            ApplySVADelta(selectionParticleSystems, 0, vDelta, 0);
+            ApplySVADelta(selectionParticleSystems, sDelta, vDelta, aDelta); // ⚠️ V 변경 시 S, A 누적값 전달
 
         // A
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label("A (알파)", GUILayout.Width(PropertyLabelWidth));
         float prevA = aDelta;
-        aDelta = EditorGUILayout.Slider(aDelta, -1f, 1f, GUILayout.Width(150));
+        aDelta = EditorGUILayout.Slider(aDelta, -1f, 1f, GUILayout.Width(180));
         if (GUILayout.Button("✔️", GUILayout.Width(PropertyButtonWidth)))
         {
             SnapshotOriginalColors();
@@ -131,7 +131,7 @@ public class _PS_Change : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         if (Mathf.Abs(aDelta - prevA) > 0.0001f)
-            ApplySVADelta(selectionParticleSystems, 0, 0, aDelta);
+            ApplySVADelta(selectionParticleSystems, sDelta, vDelta, aDelta); // ⚠️ A 변경 시 S, V 누적값 전달
 		
 		EditorGUILayout.EndVertical();
     }
@@ -448,25 +448,30 @@ public class _PS_Change : EditorWindow
             var main = ps.main;
             ApplyStartColorSVADelta(main, orig, sDelta, vDelta, aDelta);
 
-            // 2. Color Over Lifetime 변경 (추가된 기능)
+            // 2. Color Over Lifetime 변경 (수정: aDelta를 0으로 전달하여 알파 컨트롤 제외)
             var col = ps.colorOverLifetime;
             if (col.enabled && orig.lifetimeSnapshot != null)
             {
-                ApplyLifetimeColorSVADelta(col, orig.lifetimeSnapshot, sDelta, vDelta, aDelta);
+                ApplyLifetimeColorSVADelta(col, orig.lifetimeSnapshot, sDelta, vDelta, 0f);
             }
             
             EditorUtility.SetDirty(ps);
         }
     }
 
-    // StartColor SVA Delta 적용 헬퍼
+    // StartColor SVA Delta 적용 헬퍼 (수정: 원래 채도 S가 0일 때 sDelta 무시 - 회색/검은색/흰색 모두 해당)
     void ApplyStartColorSVADelta(ParticleSystem.MainModule main, ParticleColorSnapshot orig, float sDelta, float vDelta, float aDelta)
     {
         if (IsSingleColor(main))
         {
             Color.RGBToHSV(orig.origColor, out float h, out float s, out float v);
             float a = orig.origColor.a;
-            s = Mathf.Clamp01(s + sDelta);
+            
+            // 💡 수정된 로직: 원래 채도가 0이면 (회색 계열) sDelta 무시
+            if (s > 0.0001f) // s가 0이 아니면 (색상이 있으면) 채도 적용
+                s = Mathf.Clamp01(s + sDelta);
+            // else s는 0으로 유지됨
+
             v = Mathf.Clamp01(v + vDelta);
             a = Mathf.Clamp01(a + aDelta);
             var rgb = Color.HSVToRGB(h, s, v); rgb.a = a;
@@ -474,11 +479,20 @@ public class _PS_Change : EditorWindow
         }
         else if (IsTwoColors(main))
         {
+            // ColorMin
             Color.RGBToHSV(orig.origColorMin, out float hMin, out float sMin, out float vMin);
+            // ColorMax
             Color.RGBToHSV(orig.origColorMax, out float hMax, out float sMax, out float vMax);
 
             float aMin = orig.origColorMin.a, aMax = orig.origColorMax.a;
-            sMin = Mathf.Clamp01(sMin + sDelta); sMax = Mathf.Clamp01(sMax + sDelta);
+            
+            // 💡 ColorMin: 원래 채도가 0이면 sDelta 무시
+            if (sMin > 0.0001f)
+                sMin = Mathf.Clamp01(sMin + sDelta); 
+            // 💡 ColorMax: 원래 채도가 0이면 sDelta 무시
+            if (sMax > 0.0001f)
+                sMax = Mathf.Clamp01(sMax + sDelta);
+            
             vMin = Mathf.Clamp01(vMin + vDelta); vMax = Mathf.Clamp01(vMax + vDelta);
             aMin = Mathf.Clamp01(aMin + aDelta); aMax = Mathf.Clamp01(aMax + aDelta);
 
@@ -499,23 +513,25 @@ public class _PS_Change : EditorWindow
         }
     }
     
-    // Color Over Lifetime SVA Delta 적용 헬퍼 (추가됨)
+    // Color Over Lifetime SVA Delta 적용 헬퍼 (수정: aDelta 무시)
     void ApplyLifetimeColorSVADelta(ParticleSystem.ColorOverLifetimeModule col, ParticleColorLifetimeSnapshot orig, float sDelta, float vDelta, float aDelta)
     {
+        // aDelta는 무시됩니다 (Color Over Lifetime 알파 컨트롤 제외 요청)
         if (orig.mode == ParticleSystemGradientMode.Gradient && orig.gradient != null)
         {
-            UnityEngine.Gradient g = ShiftGradientSVA(orig.gradient, sDelta, vDelta, aDelta);
+            UnityEngine.Gradient g = ShiftGradientSVA(orig.gradient, sDelta, vDelta, 0f); 
             col.color = new ParticleSystem.MinMaxGradient(g);
         }
         else if (orig.mode == ParticleSystemGradientMode.TwoGradients && orig.gradientMin != null && orig.gradientMax != null)
         {
-            UnityEngine.Gradient gMin = ShiftGradientSVA(orig.gradientMin, sDelta, vDelta, aDelta);
-            UnityEngine.Gradient gMax = ShiftGradientSVA(orig.gradientMax, sDelta, vDelta, aDelta);
+            UnityEngine.Gradient gMin = ShiftGradientSVA(orig.gradientMin, sDelta, vDelta, 0f);
+            UnityEngine.Gradient gMax = ShiftGradientSVA(orig.gradientMax, sDelta, vDelta, 0f);
             col.color = new ParticleSystem.MinMaxGradient(gMin, gMax);
         }
     }
 
     // ⚠️ Gradient 타입을 UnityEngine.Gradient로 명시
+    // (수정: 원래 채도 S가 0일 때 sDelta 무시 & Alpha Key에 대한 aDelta 적용 로직 제거)
     UnityEngine.Gradient ShiftGradientSVA(UnityEngine.Gradient src, float sDelta, float vDelta, float aDelta)
     {
         UnityEngine.GradientColorKey[] ck = src.colorKeys;
@@ -525,13 +541,25 @@ public class _PS_Change : EditorWindow
         {
             Color c = ck[i].color;
             Color.RGBToHSV(c, out float h, out float s, out float v);
-            s = Mathf.Clamp01(s + sDelta);
+            
+            // 💡 수정된 로직: 원래 채도가 0이면 sDelta 무시
+            if (s > 0.0001f) // s가 0이 아니면 (색상이 있으면) 채도 적용
+                s = Mathf.Clamp01(s + sDelta);
+            // else s는 0으로 유지됨
+            
             v = Mathf.Clamp01(v + vDelta);
-            Color nc = Color.HSVToRGB(h, s, v); nc.a = c.a;
+            
+            Color nc = Color.HSVToRGB(h, s, v); 
+            nc.a = c.a; // 기존 알파값 유지
+            
             ck[i].color = nc;
         }
+        
+        // ❌ Color Over Lifetime 알파 컨트롤 제외 요청에 따라 aDelta 적용 로직 제거
+        /*
         for (int i = 0; i < ak.Length; i++)
-            ak[i].alpha = Mathf.Clamp01(ak[i].alpha + aDelta);
+            ak[i].alpha = Mathf.Clamp01(ak[i].alpha + aDelta); 
+        */
 
         // ⚠️ UnityEngine.Gradient 명시
         UnityEngine.Gradient g = new UnityEngine.Gradient();
