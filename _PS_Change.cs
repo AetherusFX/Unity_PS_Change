@@ -67,7 +67,7 @@ public class _PS_Change : EditorWindow
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label("Hue", GUILayout.Width(PropertyLabelWidth));
         float prevHue = hueShift;
-        hueShift = EditorGUILayout.Slider(hueShift, -1f, 1f, GUILayout.Width(180));
+        hueShift = EditorGUILayout.Slider(hueShift, -0.5f, 0.5f, GUILayout.Width(180));
         if (GUILayout.Button("✔️", GUILayout.Width(PropertyButtonWidth)))
         {
             SnapshotOriginalColors();
