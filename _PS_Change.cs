@@ -50,9 +50,9 @@ public class _PS_Change : EditorWindow
         DrawUI_PropertyDelta();
     }
 
-    private const float PropertyLabelWidth = 100f;
-    private const float PropertyButtonWidth = 40f;
-    private const float PropertyFloatWidth = 60f;
+    private const float PropertyLabelWidth = 80f;
+    private const float PropertyButtonWidth = 30f;
+    private const float PropertyFloatWidth = 50f;
 
     void DrawUI_HueShift()
     {
